@@ -39,12 +39,18 @@ export default function ChatWindow({ messages, loading, draft, onDraftChange, on
         {messages.length === 0 && !loading && (
           <p className="muted center">Pose ta première question à Study Buddy.</p>
         )}
-        {messages.map((m, i) => (
-          <div key={i} className={`bubble ${m.role}`}>
-            {/* The LLM answers in Markdown; user messages are shown as typed. */}
-            {m.role === 'assistant' ? <Markdown>{m.content}</Markdown> : m.content}
-          </div>
-        ))}
+        {messages.map((m, i) =>
+          m.role === 'system-notification' ? (
+            <div key={i} className="notification">
+              {m.content}
+            </div>
+          ) : (
+            <div key={i} className={`bubble ${m.role}`}>
+              {/* The LLM answers in Markdown; user messages are shown as typed. */}
+              {m.role === 'assistant' ? <Markdown>{m.content}</Markdown> : m.content}
+            </div>
+          ),
+        )}
         {loading && <div className="bubble assistant typing">…</div>}
         <div ref={bottomRef} />
       </div>

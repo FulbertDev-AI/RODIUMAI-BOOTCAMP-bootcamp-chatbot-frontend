@@ -80,8 +80,12 @@ export default function App() {
     setMessages((list) => [...list, { role: 'user', content: text }])
     setLoading(true)
     try {
-      const reply = await sendMessage(activeId, text)
-      setMessages((list) => [...list, { role: 'assistant', content: reply }])
+      const { reply, notification } = await sendMessage(activeId, text)
+      setMessages((list) => [
+        ...list,
+        { role: 'assistant', content: reply },
+        ...(notification ? [{ role: 'system-notification' as const, content: notification }] : []),
+      ])
       // The first message becomes the conversation's preview in the sidebar.
       if (isFirstMessage) setConversations(await listConversations())
     } catch (err) {

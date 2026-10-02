@@ -183,6 +183,15 @@
   background: var(--bg);
 }
 
+.notification {
+  align-self: center;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .bubble.typing {
   color: var(--muted);
 }

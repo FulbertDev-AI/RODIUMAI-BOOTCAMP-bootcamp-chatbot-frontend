@@ -1,6 +1,6 @@
 // Thin typed wrappers around the FastAPI backend (proxied under /api by Vite).
 
-export type Role = 'user' | 'assistant'
+export type Role = 'user' | 'assistant' | 'system-notification'
 
 export interface ConversationSummary {
   id: number
@@ -49,10 +49,14 @@ export function getMessages(conversationId: number): Promise<Message[]> {
   return request(`/conversations/${conversationId}/messages`)
 }
 
-export async function sendMessage(conversationId: number, message: string): Promise<string> {
-  const { reply } = await request<{ reply: string }>('/chat', {
+export interface ChatResult {
+  reply: string
+  notification: string | null // set when the backend also stored a system-notification
+}
+
+export function sendMessage(conversationId: number, message: string): Promise<ChatResult> {
+  return request('/chat', {
     method: 'POST',
     body: JSON.stringify({ conversation_id: conversationId, message }),
   })
-  return reply
 }
