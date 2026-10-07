@@ -11,6 +11,9 @@
   --bubble-assistant: #f1f3f5;
   --error-bg: #fdecec;
   --error-text: #a61b1b;
+  --note-bg: #fff8e8;
+  --note-border: #e0c56e;
+  --note-text: #7a5b12;
 
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.5;
@@ -32,6 +35,9 @@
     --bubble-assistant: #262930;
     --error-bg: #3b1d1f;
     --error-text: #f5a5a5;
+    --note-bg: #2c2718;
+    --note-border: #8a7340;
+    --note-text: #f0d78c;
   }
 }
 

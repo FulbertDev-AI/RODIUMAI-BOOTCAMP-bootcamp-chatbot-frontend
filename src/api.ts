@@ -1,6 +1,8 @@
 // Thin typed wrappers around the FastAPI backend (proxied under /api by Vite).
 
-export type Role = 'user' | 'assistant' | 'system-notification'
+import { consumeChatStream, type StreamChatResult } from './sse.ts'
+
+export type Role = 'user' | 'assistant' | 'system-notification' | 'note'
 
 export interface ConversationSummary {
   id: number
@@ -15,6 +17,14 @@ export interface Message {
   created_at: string
 }
 
+export function errorFromHttpBody(status: number, body: unknown): Error {
+  const detail =
+    body && typeof body === 'object' && 'detail' in body && typeof body.detail === 'string'
+      ? body.detail
+      : null
+  return new Error(detail ?? `Erreur ${status}`)
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
@@ -26,10 +36,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error('Impossible de joindre le serveur.')
   }
   if (!response.ok) {
-    // FastAPI errors look like {"detail": "..."}.
     const body = await response.json().catch(() => null)
-    const detail = typeof body?.detail === 'string' ? body.detail : null
-    throw new Error(detail ?? `Erreur ${response.status}`)
+    throw errorFromHttpBody(response.status, body)
   }
   return response.json() as Promise<T>
 }
@@ -49,14 +57,83 @@ export function getMessages(conversationId: number): Promise<Message[]> {
   return request(`/conversations/${conversationId}/messages`)
 }
 
-export interface ChatResult {
-  reply: string
-  notification: string | null // set when the backend also stored a system-notification
+export type ChatResult = StreamChatResult
+
+export interface ModelOption {
+  id: string
+  label: string
 }
 
-export function sendMessage(conversationId: number, message: string): Promise<ChatResult> {
-  return request('/chat', {
+export interface ModelsCatalog {
+  default: string
+  models: ModelOption[]
+}
+
+export function parseModelsCatalog(body: unknown): ModelsCatalog {
+  if (!body || typeof body !== 'object') {
+    throw new Error('Liste de modèles invalide.')
+  }
+  const raw = body as { default?: unknown; models?: unknown }
+  if (!Array.isArray(raw.models) || raw.models.length === 0) {
+    throw new Error('Aucun modèle disponible.')
+  }
+  const models: ModelOption[] = []
+  for (const item of raw.models) {
+    if (!item || typeof item !== 'object') continue
+    const id = (item as { id?: unknown }).id
+    const label = (item as { label?: unknown }).label
+    if (typeof id === 'string' && id.trim() && typeof label === 'string' && label.trim()) {
+      models.push({ id, label })
+    }
+  }
+  if (models.length === 0) {
+    throw new Error('Aucun modèle disponible.')
+  }
+  const declared = typeof raw.default === 'string' ? raw.default : ''
+  const defaultId = models.some((m) => m.id === declared) ? declared : models[0].id
+  return { default: defaultId, models }
+}
+
+export async function getModels(): Promise<ModelsCatalog> {
+  return parseModelsCatalog(await request<unknown>('/models'))
+}
+
+export async function sendMessage(
+  conversationId: number,
+  message: string,
+  model: string,
+  onDelta: (content: string) => void,
+): Promise<ChatResult> {
+  let response: Response
+  try {
+    response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversation_id: conversationId, message, model }),
+    })
+  } catch {
+    throw new Error('Impossible de joindre le serveur.')
+  }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw errorFromHttpBody(response.status, body)
+  }
+  if (!response.body) {
+    throw new Error('La réponse a été interrompue.')
+  }
+  return consumeChatStream(response.body, onDelta)
+}
+
+export interface CreateNoteRequest {
+  content: string
+}
+
+export type CreateNoteResponse = Message
+
+export function createNote(conversationId: number, content: string): Promise<CreateNoteResponse> {
+  const body: CreateNoteRequest = { content }
+  return request<CreateNoteResponse>(`/conversations/${conversationId}/notes`, {
     method: 'POST',
-    body: JSON.stringify({ conversation_id: conversationId, message }),
+    body: JSON.stringify(body),
   })
 }

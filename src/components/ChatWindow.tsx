@@ -1,6 +1,8 @@
 import { useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react'
 import Markdown from 'react-markdown'
-import type { Role } from '../api'
+import type { ModelOption, Role } from '../api'
+import ModelSelect from './ModelSelect'
+import NoteComposer from './NoteComposer'
 
 export interface ChatMessage {
   role: Role
@@ -10,12 +12,63 @@ export interface ChatMessage {
 interface ChatWindowProps {
   messages: ChatMessage[]
   loading: boolean
+  streaming: boolean
+  chatDisabled: boolean
   draft: string
   onDraftChange: (value: string) => void
   onSend: () => void
+  onCreateNote: (content: string) => Promise<void>
+  models: ModelOption[]
+  selectedModel: string
+  modelsLoading: boolean
+  onModelChange: (modelId: string) => void
 }
 
-export default function ChatWindow({ messages, loading, draft, onDraftChange, onSend }: ChatWindowProps) {
+function renderMessage(m: ChatMessage, i: number, streamingTail: boolean) {
+  if (m.role === 'system-notification') {
+    return (
+      <div key={i} className="notification">
+        {m.content}
+      </div>
+    )
+  }
+  if (m.role === 'note') {
+    return (
+      <div key={i} className="note">
+        <span className="note-label">📝 Note personnelle</span>
+        <p className="note-content">{m.content}</p>
+      </div>
+    )
+  }
+  return (
+    <div key={i} className={`bubble ${m.role}${streamingTail ? ' streaming' : ''}`}>
+      {m.role === 'assistant' ? (
+        m.content ? (
+          <Markdown>{m.content}</Markdown>
+        ) : (
+          <span className="typing">…</span>
+        )
+      ) : (
+        m.content
+      )}
+    </div>
+  )
+}
+
+export default function ChatWindow({
+  messages,
+  loading,
+  streaming,
+  chatDisabled,
+  draft,
+  onDraftChange,
+  onSend,
+  onCreateNote,
+  models,
+  selectedModel,
+  modelsLoading,
+  onModelChange,
+}: ChatWindowProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Keep the latest message in view.
@@ -25,7 +78,7 @@ export default function ChatWindow({ messages, loading, draft, onDraftChange, on
 
   function handleSubmit(event: FormEvent) {
     event.preventDefault()
-    if (!loading && draft.trim()) onSend()
+    if (!loading && !chatDisabled && draft.trim()) onSend()
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -40,34 +93,32 @@ export default function ChatWindow({ messages, loading, draft, onDraftChange, on
           <p className="muted center">Pose ta première question à Study Buddy.</p>
         )}
         {messages.map((m, i) =>
-          m.role === 'system-notification' ? (
-            <div key={i} className="notification">
-              {m.content}
-            </div>
-          ) : (
-            <div key={i} className={`bubble ${m.role}`}>
-              {/* The LLM answers in Markdown; user messages are shown as typed. */}
-              {m.role === 'assistant' ? <Markdown>{m.content}</Markdown> : m.content}
-            </div>
-          ),
+          renderMessage(m, i, Boolean(streaming && i === messages.length - 1 && m.role === 'assistant')),
         )}
-        {loading && <div className="bubble assistant typing">…</div>}
         <div ref={bottomRef} />
       </div>
       <form className="composer" onSubmit={handleSubmit}>
+        <ModelSelect
+          models={models}
+          value={selectedModel}
+          loading={modelsLoading}
+          disabled={loading}
+          onChange={onModelChange}
+        />
         <textarea
           value={draft}
           onChange={(e) => onDraftChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Écris ton message…"
           rows={2}
-          disabled={loading}
+          disabled={loading || chatDisabled}
           autoFocus
         />
-        <button type="submit" disabled={loading || !draft.trim()}>
+        <button type="submit" disabled={loading || chatDisabled || !draft.trim()}>
           Envoyer
         </button>
       </form>
+      <NoteComposer disabled={loading} onCreate={onCreateNote} />
     </section>
   )
 }

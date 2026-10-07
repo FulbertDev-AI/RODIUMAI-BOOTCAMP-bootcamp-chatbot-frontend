@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import './App.css'
 import {
   createConversation,
+  createNote,
   getMessages,
+  getModels,
   listConversations,
   sendMessage,
   type ConversationSummary,
+  type ModelOption,
 } from './api'
 import ChatWindow, { type ChatMessage } from './components/ChatWindow'
 import Sidebar from './components/Sidebar'
@@ -20,7 +23,14 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
+  const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [models, setModels] = useState<ModelOption[]>([])
+  const [selectedModel, setSelectedModel] = useState('')
+  const [modelsLoading, setModelsLoading] = useState(true)
+
+  const sending = loading || streaming
+  const canChat = !modelsLoading && Boolean(selectedModel)
 
   // On startup, load the history and open the most recent conversation.
   useEffect(() => {
@@ -30,6 +40,20 @@ export default function App() {
         if (list.length > 0) setActiveId(list[0].id)
       })
       .catch((err) => setError(errorMessage(err)))
+  }, [])
+
+  useEffect(() => {
+    getModels()
+      .then((catalog) => {
+        setModels(catalog.models)
+        setSelectedModel(catalog.default)
+      })
+      .catch((err) => {
+        setModels([])
+        setSelectedModel('')
+        setError(`Impossible de charger les modèles. ${errorMessage(err)}`)
+      })
+      .finally(() => setModelsLoading(false))
   }, [])
 
   // Load the messages whenever another conversation is opened.
@@ -47,7 +71,7 @@ export default function App() {
   }, [activeId])
 
   function selectConversation(id: number) {
-    if (loading || id === activeId) return
+    if (sending || id === activeId) return
     setError(null)
     setDraft('')
     setMessages([])
@@ -55,7 +79,7 @@ export default function App() {
   }
 
   async function handleNew() {
-    if (loading) return
+    if (sending) return
     setError(null)
     try {
       const id = await createConversation()
@@ -72,29 +96,56 @@ export default function App() {
   }
 
   async function handleSend() {
-    if (activeId === null) return
+    if (activeId === null || sending || !canChat) return
     const text = draft.trim()
-    const isFirstMessage = messages.length === 0
+    const isFirstMessage = !messages.some((m) => m.role === 'user')
     setError(null)
     setDraft('')
-    setMessages((list) => [...list, { role: 'user', content: text }])
+    setMessages((list) => [...list, { role: 'user', content: text }, { role: 'assistant', content: '' }])
     setLoading(true)
     try {
-      const { reply, notification } = await sendMessage(activeId, text)
-      setMessages((list) => [
-        ...list,
-        { role: 'assistant', content: reply },
-        ...(notification ? [{ role: 'system-notification' as const, content: notification }] : []),
-      ])
+      const { reply, notification } = await sendMessage(activeId, text, selectedModel, (delta) => {
+        setStreaming(true)
+        setMessages((list) => {
+          const next = [...list]
+          const last = next[next.length - 1]
+          if (last?.role === 'assistant') {
+            next[next.length - 1] = { role: 'assistant', content: last.content + delta }
+          }
+          return next
+        })
+      })
+      setMessages((list) => {
+        const next = [...list]
+        const last = next[next.length - 1]
+        if (last?.role === 'assistant') {
+          next[next.length - 1] = { role: 'assistant', content: reply }
+        }
+        if (notification) next.push({ role: 'system-notification', content: notification })
+        return next
+      })
       // The first message becomes the conversation's preview in the sidebar.
       if (isFirstMessage) setConversations(await listConversations())
     } catch (err) {
-      // The backend didn't save the turn: drop the optimistic message and give the text back.
-      setMessages((list) => list.slice(0, -1))
+      // HTTP / SSE error: drop the optimistic user + incomplete assistant turn.
+      setMessages((list) => list.slice(0, -2))
       setDraft(text)
       setError(errorMessage(err))
     } finally {
       setLoading(false)
+      setStreaming(false)
+    }
+  }
+
+  async function handleCreateNote(content: string) {
+    if (activeId === null) return
+    setError(null)
+    try {
+      const note = await createNote(activeId, content)
+      setMessages((list) => [...list, { role: note.role, content: note.content }])
+    } catch (err) {
+      setError(errorMessage(err))
+      throw err
     }
   }
 
@@ -125,10 +176,17 @@ export default function App() {
         ) : (
           <ChatWindow
             messages={messages}
-            loading={loading}
+            loading={sending}
+            streaming={streaming}
+            chatDisabled={!canChat}
             draft={draft}
             onDraftChange={setDraft}
             onSend={handleSend}
+            onCreateNote={handleCreateNote}
+            models={models}
+            selectedModel={selectedModel}
+            modelsLoading={modelsLoading}
+            onModelChange={setSelectedModel}
           />
         )}
       </main>
