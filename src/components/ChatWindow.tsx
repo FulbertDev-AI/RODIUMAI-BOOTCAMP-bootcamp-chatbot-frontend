@@ -1,12 +1,14 @@
 import { useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react'
 import Markdown from 'react-markdown'
-import type { ModelOption, Role } from '../api'
+import type { ModelOption, Role, TokenUsage } from '../api'
+import { formatTokenUsage } from '../sse'
 import ModelSelect from './ModelSelect'
 import NoteComposer from './NoteComposer'
 
 export interface ChatMessage {
   role: Role
   content: string
+  usage?: TokenUsage | null
 }
 
 interface ChatWindowProps {
@@ -17,6 +19,7 @@ interface ChatWindowProps {
   draft: string
   onDraftChange: (value: string) => void
   onSend: () => void
+  onStop: () => void
   onCreateNote: (content: string) => Promise<void>
   models: ModelOption[]
   selectedModel: string
@@ -40,8 +43,8 @@ function renderMessage(m: ChatMessage, i: number, streamingTail: boolean) {
       </div>
     )
   }
-  return (
-    <div key={i} className={`bubble ${m.role}${streamingTail ? ' streaming' : ''}`}>
+  const bubble = (
+    <div className={`bubble ${m.role}${streamingTail ? ' streaming' : ''}`}>
       {m.role === 'assistant' ? (
         m.content ? (
           <Markdown>{m.content}</Markdown>
@@ -51,6 +54,20 @@ function renderMessage(m: ChatMessage, i: number, streamingTail: boolean) {
       ) : (
         m.content
       )}
+    </div>
+  )
+  if (m.role === 'assistant') {
+    const showUsage = Boolean(m.usage && !streamingTail)
+    return (
+      <div key={i} className="assistant-turn">
+        {bubble}
+        {showUsage && m.usage ? <p className="token-usage">{formatTokenUsage(m.usage)}</p> : null}
+      </div>
+    )
+  }
+  return (
+    <div key={i} className={`bubble ${m.role}`}>
+      {m.content}
     </div>
   )
 }
@@ -63,6 +80,7 @@ export default function ChatWindow({
   draft,
   onDraftChange,
   onSend,
+  onStop,
   onCreateNote,
   models,
   selectedModel,
@@ -114,9 +132,15 @@ export default function ChatWindow({
           disabled={loading || chatDisabled}
           autoFocus
         />
-        <button type="submit" disabled={loading || chatDisabled || !draft.trim()}>
-          Envoyer
-        </button>
+        {loading ? (
+          <button type="button" className="stop-button" onClick={onStop}>
+            Arrêter
+          </button>
+        ) : (
+          <button type="submit" disabled={chatDisabled || !draft.trim()}>
+            Envoyer
+          </button>
+        )}
       </form>
       <NoteComposer disabled={loading} onCreate={onCreateNote} />
     </section>

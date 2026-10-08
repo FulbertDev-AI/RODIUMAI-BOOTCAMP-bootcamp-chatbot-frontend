@@ -92,12 +92,38 @@
   color: var(--error-text);
 }
 
-.error button {
+.error .dismiss {
   border: none;
   background: none;
   color: inherit;
   font-size: 1.2rem;
   cursor: pointer;
+}
+
+.error-retry {
+  gap: 12px;
+}
+
+.error-retry-message {
+  margin: 0;
+  flex: 1;
+}
+
+.retry-button {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--error-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.retry-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .empty {
@@ -140,6 +166,23 @@
   background: var(--accent);
   color: var(--accent-text);
   border-bottom-right-radius: 4px;
+}
+
+.assistant-turn {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  max-width: 80%;
+}
+
+.assistant-turn .bubble {
+  max-width: 100%;
+}
+
+.token-usage {
+  margin: 4px 4px 0;
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .bubble.assistant {
@@ -320,6 +363,11 @@
 .composer textarea:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.composer .stop-button {
+  background: var(--error-text);
+  color: #ffffff;
 }
 
 .muted {

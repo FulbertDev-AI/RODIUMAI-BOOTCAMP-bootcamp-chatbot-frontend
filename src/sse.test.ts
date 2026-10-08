@@ -73,7 +73,7 @@ describe('consumeChatStream', () => {
       (chunk) => deltas.push(chunk),
     )
     expect(deltas.join('')).toBe('Hello')
-    expect(result).toEqual({ reply: 'Hello', notification: null })
+    expect(result).toEqual({ reply: 'Hello', notification: null, usage: null })
   })
 
   it('throws on type:error so the reply is not treated as successful', async () => {
@@ -103,7 +103,7 @@ describe('consumeChatStream', () => {
       ]),
       () => undefined,
     )
-    expect(result).toEqual({ reply: 'fin', notification: 'ok' })
+    expect(result).toEqual({ reply: 'fin', notification: 'ok', usage: null })
   })
 })
 

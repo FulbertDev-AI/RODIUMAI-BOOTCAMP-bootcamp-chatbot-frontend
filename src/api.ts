@@ -1,6 +1,9 @@
 // Thin typed wrappers around the FastAPI backend (proxied under /api by Vite).
 
+import { isAbortError } from './abort.ts'
 import { consumeChatStream, type StreamChatResult } from './sse.ts'
+
+export type { TokenUsage } from './sse.ts'
 
 export type Role = 'user' | 'assistant' | 'system-notification' | 'note'
 
@@ -103,6 +106,7 @@ export async function sendMessage(
   message: string,
   model: string,
   onDelta: (content: string) => void,
+  signal?: AbortSignal,
 ): Promise<ChatResult> {
   let response: Response
   try {
@@ -110,8 +114,10 @@ export async function sendMessage(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversation_id: conversationId, message, model }),
+      signal,
     })
-  } catch {
+  } catch (err) {
+    if (isAbortError(err)) throw err
     throw new Error('Impossible de joindre le serveur.')
   }
   if (!response.ok) {
@@ -121,7 +127,7 @@ export async function sendMessage(
   if (!response.body) {
     throw new Error('La réponse a été interrompue.')
   }
-  return consumeChatStream(response.body, onDelta)
+  return consumeChatStream(response.body, onDelta, signal)
 }
 
 export interface CreateNoteRequest {

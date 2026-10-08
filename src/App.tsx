@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { isAbortError } from './abort'
 import './App.css'
 import {
   createConversation,
@@ -10,8 +11,10 @@ import {
   type ConversationSummary,
   type ModelOption,
 } from './api'
+import ChatRetryBanner from './components/ChatRetryBanner'
 import ChatWindow, { type ChatMessage } from './components/ChatWindow'
 import Sidebar from './components/Sidebar'
+import { shouldShowRetry, type FailedChatRequest } from './retry'
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Une erreur est survenue.'
@@ -28,9 +31,12 @@ export default function App() {
   const [models, setModels] = useState<ModelOption[]>([])
   const [selectedModel, setSelectedModel] = useState('')
   const [modelsLoading, setModelsLoading] = useState(true)
+  const [failedChat, setFailedChat] = useState<FailedChatRequest | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const sending = loading || streaming
   const canChat = !modelsLoading && Boolean(selectedModel)
+  const showRetry = shouldShowRetry(failedChat, activeId)
 
   // On startup, load the history and open the most recent conversation.
   useEffect(() => {
@@ -95,46 +101,69 @@ export default function App() {
     }
   }
 
-  async function handleSend() {
-    if (activeId === null || sending || !canChat) return
-    const text = draft.trim()
+  async function runChatTurn(request: FailedChatRequest, fromRetry: boolean) {
+    if (sending || activeId !== request.conversationId) return
     const isFirstMessage = !messages.some((m) => m.role === 'user')
     setError(null)
-    setDraft('')
-    setMessages((list) => [...list, { role: 'user', content: text }, { role: 'assistant', content: '' }])
+    if (!fromRetry) setDraft('')
+    setMessages((list) => [...list, { role: 'user', content: request.message }, { role: 'assistant', content: '' }])
+    const controller = new AbortController()
+    abortRef.current = controller
     setLoading(true)
     try {
-      const { reply, notification } = await sendMessage(activeId, text, selectedModel, (delta) => {
-        setStreaming(true)
-        setMessages((list) => {
-          const next = [...list]
-          const last = next[next.length - 1]
-          if (last?.role === 'assistant') {
-            next[next.length - 1] = { role: 'assistant', content: last.content + delta }
-          }
-          return next
-        })
-      })
+      const { reply, notification, usage } = await sendMessage(
+        request.conversationId,
+        request.message,
+        request.model,
+        (delta) => {
+          setStreaming(true)
+          setMessages((list) => {
+            const next = [...list]
+            const last = next[next.length - 1]
+            if (last?.role === 'assistant') {
+              next[next.length - 1] = { role: 'assistant', content: last.content + delta }
+            }
+            return next
+          })
+        },
+        controller.signal,
+      )
       setMessages((list) => {
         const next = [...list]
         const last = next[next.length - 1]
         if (last?.role === 'assistant') {
-          next[next.length - 1] = { role: 'assistant', content: reply }
+          next[next.length - 1] = { role: 'assistant', content: reply, usage }
         }
         if (notification) next.push({ role: 'system-notification', content: notification })
         return next
       })
-      // The first message becomes the conversation's preview in the sidebar.
+      setFailedChat(null)
       if (isFirstMessage) setConversations(await listConversations())
     } catch (err) {
-      // HTTP / SSE error: drop the optimistic user + incomplete assistant turn.
       setMessages((list) => list.slice(0, -2))
-      setDraft(text)
-      setError(errorMessage(err))
+      if (!fromRetry) setDraft(request.message)
+      if (!isAbortError(err)) setFailedChat(request)
     } finally {
+      abortRef.current = null
       setLoading(false)
       setStreaming(false)
     }
+  }
+
+  function handleStop() {
+    abortRef.current?.abort()
+  }
+
+  async function handleSend() {
+    if (activeId === null || sending || !canChat) return
+    const text = draft.trim()
+    if (!text) return
+    await runChatTurn({ conversationId: activeId, message: text, model: selectedModel }, false)
+  }
+
+  async function handleRetry() {
+    if (!failedChat || sending) return
+    await runChatTurn(failedChat, true)
   }
 
   async function handleCreateNote(content: string) {
@@ -158,13 +187,17 @@ export default function App() {
         onNew={handleNew}
       />
       <main className="main">
-        {error && (
-          <div className="error" role="alert">
-            {error}
-            <button onClick={() => setError(null)} aria-label="Fermer">
-              ×
-            </button>
-          </div>
+        {showRetry ? (
+          <ChatRetryBanner retrying={sending} onRetry={() => void handleRetry()} />
+        ) : (
+          error && (
+            <div className="error" role="alert">
+              {error}
+              <button className="dismiss" onClick={() => setError(null)} aria-label="Fermer">
+                ×
+              </button>
+            </div>
+          )
         )}
         {activeId === null ? (
           <div className="empty">
@@ -182,6 +215,7 @@ export default function App() {
             draft={draft}
             onDraftChange={setDraft}
             onSend={handleSend}
+            onStop={handleStop}
             onCreateNote={handleCreateNote}
             models={models}
             selectedModel={selectedModel}
