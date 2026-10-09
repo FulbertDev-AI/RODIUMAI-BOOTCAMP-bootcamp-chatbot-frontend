@@ -4,8 +4,8 @@ Interface **React + TypeScript** (Vite) d’un tuteur Python pour débutants. L�
 
 Le frontend et le backend sont volontairement dans **deux dépôts distincts** :
 
-- Frontend : [https://github.com/JeanKouss/bootcamp-chatbot-frontend](https://github.com/JeanKouss/bootcamp-chatbot-frontend)
-- Backend : [https://github.com/JeanKouss/bootcamp-chatbot-backend](https://github.com/JeanKouss/bootcamp-chatbot-backend)
+- Backend : [https://github.com/FulbertDev-AI/RODIUMAI-BOOTCAMP-bootcamp-chatbot-backend.git](https://github.com/FulbertDev-AI/RODIUMAI-BOOTCAMP-bootcamp-chatbot-backend.git)
+- Frontend : [https://github.com/FulbertDev-AI/RODIUMAI-BOOTCAMP-bootcamp-chatbot-frontend.git](https://github.com/FulbertDev-AI/RODIUMAI-BOOTCAMP-bootcamp-chatbot-frontend.git)
 
 ---
 
