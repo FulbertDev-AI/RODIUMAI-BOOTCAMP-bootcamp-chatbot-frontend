@@ -1,7 +1,7 @@
 import { useEffect, useRef, type FormEvent, type KeyboardEvent } from 'react'
 import Markdown from 'react-markdown'
 import type { ModelOption, Role, TokenUsage } from '../api'
-import { formatTokenUsage } from '../sse'
+import { formatTokenUsage, hasTokenUsage } from '../sse'
 import ModelSelect from './ModelSelect'
 import NoteComposer from './NoteComposer'
 
@@ -57,11 +57,12 @@ function renderMessage(m: ChatMessage, i: number, streamingTail: boolean) {
     </div>
   )
   if (m.role === 'assistant') {
-    const showUsage = Boolean(m.usage && !streamingTail)
+    const usage = m.usage
+    const showUsage = hasTokenUsage(usage) && !streamingTail
     return (
       <div key={i} className="assistant-turn">
         {bubble}
-        {showUsage && m.usage ? <p className="token-usage">{formatTokenUsage(m.usage)}</p> : null}
+        {showUsage ? <p className="token-usage">{formatTokenUsage(usage)}</p> : null}
       </div>
     )
   }

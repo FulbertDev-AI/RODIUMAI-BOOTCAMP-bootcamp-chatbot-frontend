@@ -26,7 +26,26 @@ describe('parseTokenUsage', () => {
     expect(parseTokenUsage(USAGE)).toEqual(USAGE)
     expect(parseTokenUsage(null)).toBeNull()
     expect(parseTokenUsage(undefined)).toBeNull()
-    expect(parseTokenUsage({ prompt_tokens: '100' })).toBeNull()
+    expect(parseTokenUsage({})).toBeNull()
+  })
+
+  it('accepts string numbers and alternate field names without inventing zeros', () => {
+    expect(
+      parseTokenUsage({
+        prompt_tokens: '100',
+        completion_tokens: '25',
+        total_tokens: '125',
+      }),
+    ).toEqual(USAGE)
+    expect(
+      parseTokenUsage({
+        input_tokens: 10,
+        output_tokens: 5,
+        total_tokens: 15,
+      }),
+    ).toEqual({ prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 })
+    expect(parseTokenUsage({ total_tokens: 40 })).toEqual({ total_tokens: 40 })
+    expect(formatTokenUsage({ total_tokens: 40 })).toBe('40 tokens')
   })
 })
 
@@ -39,6 +58,38 @@ describe('SSE done usage', () => {
     expect(events).toEqual([
       { type: 'done', reply: 'ok', notification: null, usage: USAGE },
     ])
+  })
+
+  it('extracts usage from a dedicated usage event and from top-level done fields', () => {
+    const parser = new SseParser()
+    expect(
+      parser.feed('data: {"type":"usage","input_tokens":8,"output_tokens":2,"total_tokens":10}\n\n'),
+    ).toEqual([{ type: 'usage', usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 } }])
+    expect(
+      parser.feed(
+        'data: {"type":"done","reply":"ok","notification":null,"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}\n\n',
+      ),
+    ).toEqual([
+      {
+        type: 'done',
+        reply: 'ok',
+        notification: null,
+        usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+      },
+    ])
+  })
+
+  it('merges a usage event with done into the stream result', async () => {
+    const result = await consumeChatStream(
+      streamFromChunks([
+        'data: {"type":"delta","content":"ok"}\n\n',
+        'data: {"type":"done","reply":"ok","notification":null}\n\n',
+        'data: {"type":"usage","prompt_tokens":7,"completion_tokens":2,"total_tokens":9}\n\n',
+        'data: [DONE]\n\n',
+      ]),
+      () => undefined,
+    )
+    expect(result.usage).toEqual({ prompt_tokens: 7, completion_tokens: 2, total_tokens: 9 })
   })
 
   it('keeps usage null when the backend sends usage: null', () => {

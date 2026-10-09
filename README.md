@@ -184,7 +184,6 @@ Dernière exécution observée dans ce dépôt :
 | 1 — Retry après erreur LLM | Réalisé |
 | 2 — Stop pendant le streaming (`AbortController`) | Réalisé |
 | 3 — Affichage des tokens (`usage` du `done`) | Réalisé |
-| 4 — Déploiement | Non réalisé |
 
 ---
 

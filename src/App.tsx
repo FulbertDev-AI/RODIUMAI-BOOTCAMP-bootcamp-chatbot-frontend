@@ -33,6 +33,8 @@ export default function App() {
   const [modelsLoading, setModelsLoading] = useState(true)
   const [failedChat, setFailedChat] = useState<FailedChatRequest | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const stopRequestedRef = useRef(false)
+  const inFlightRef = useRef<{ request: FailedChatRequest; fromRetry: boolean } | null>(null)
 
   const sending = loading || streaming
   const canChat = !modelsLoading && Boolean(selectedModel)
@@ -109,6 +111,8 @@ export default function App() {
     setMessages((list) => [...list, { role: 'user', content: request.message }, { role: 'assistant', content: '' }])
     const controller = new AbortController()
     abortRef.current = controller
+    stopRequestedRef.current = false
+    inFlightRef.current = { request, fromRetry }
     setLoading(true)
     try {
       const { reply, notification, usage } = await sendMessage(
@@ -116,6 +120,7 @@ export default function App() {
         request.message,
         request.model,
         (delta) => {
+          if (stopRequestedRef.current || controller.signal.aborted) return
           setStreaming(true)
           setMessages((list) => {
             const next = [...list]
@@ -128,6 +133,8 @@ export default function App() {
         },
         controller.signal,
       )
+      abortRef.current = null
+      if (stopRequestedRef.current || controller.signal.aborted) return
       setMessages((list) => {
         const next = [...list]
         const last = next[next.length - 1]
@@ -140,18 +147,30 @@ export default function App() {
       setFailedChat(null)
       if (isFirstMessage) setConversations(await listConversations())
     } catch (err) {
+      if (stopRequestedRef.current) return
       setMessages((list) => list.slice(0, -2))
       if (!fromRetry) setDraft(request.message)
       if (!isAbortError(err)) setFailedChat(request)
     } finally {
-      abortRef.current = null
+      if (abortRef.current === controller) abortRef.current = null
+      if (inFlightRef.current?.request === request) inFlightRef.current = null
       setLoading(false)
       setStreaming(false)
     }
   }
 
   function handleStop() {
-    abortRef.current?.abort()
+    const controller = abortRef.current
+    const flight = inFlightRef.current
+    if (!controller || stopRequestedRef.current) return
+    stopRequestedRef.current = true
+    controller.abort()
+    setMessages((list) =>
+      list.length >= 2 && list[list.length - 1]?.role === 'assistant' ? list.slice(0, -2) : list,
+    )
+    if (flight && !flight.fromRetry) setDraft(flight.request.message)
+    setLoading(false)
+    setStreaming(false)
   }
 
   async function handleSend() {

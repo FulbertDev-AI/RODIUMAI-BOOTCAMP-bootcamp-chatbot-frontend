@@ -1,14 +1,15 @@
 import { abortError, isAbortError } from './abort.ts'
 
 export type TokenUsage = {
-  prompt_tokens: number
-  completion_tokens: number
-  total_tokens: number
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
 }
 
 export type SseEvent =
   | { type: 'delta'; content: string }
   | { type: 'done'; reply: string; notification: string | null; usage: TokenUsage | null }
+  | { type: 'usage'; usage: TokenUsage }
   | { type: 'error'; message: string }
   | { type: 'end' }
 
@@ -18,28 +19,67 @@ export interface StreamChatResult {
   usage: TokenUsage | null
 }
 
+function readFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function pickNumber(source: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = readFiniteNumber(source[key])
+    if (value != null) return value
+  }
+  return undefined
+}
+
+export function hasTokenUsage(usage: TokenUsage | null | undefined): usage is TokenUsage {
+  return Boolean(
+    usage &&
+      (usage.total_tokens != null || usage.prompt_tokens != null || usage.completion_tokens != null),
+  )
+}
+
 export function parseTokenUsage(value: unknown): TokenUsage | null {
   if (value == null || typeof value !== 'object') return null
-  const raw = value as { prompt_tokens?: unknown; completion_tokens?: unknown; total_tokens?: unknown }
-  if (
-    typeof raw.prompt_tokens !== 'number' ||
-    typeof raw.completion_tokens !== 'number' ||
-    typeof raw.total_tokens !== 'number' ||
-    !Number.isFinite(raw.prompt_tokens) ||
-    !Number.isFinite(raw.completion_tokens) ||
-    !Number.isFinite(raw.total_tokens)
-  ) {
-    return null
-  }
-  return {
-    prompt_tokens: raw.prompt_tokens,
-    completion_tokens: raw.completion_tokens,
-    total_tokens: raw.total_tokens,
-  }
+  const raw = value as Record<string, unknown>
+  const nested =
+    raw.usage != null && typeof raw.usage === 'object' && !Array.isArray(raw.usage)
+      ? (raw.usage as Record<string, unknown>)
+      : raw
+  const usage: TokenUsage = {}
+  const prompt = pickNumber(nested, [
+    'prompt_tokens',
+    'input_tokens',
+    'promptTokens',
+    'inputTokens',
+    'prompt',
+    'input',
+  ])
+  const completion = pickNumber(nested, [
+    'completion_tokens',
+    'output_tokens',
+    'completionTokens',
+    'outputTokens',
+    'completion',
+    'output',
+  ])
+  const total = pickNumber(nested, ['total_tokens', 'totalTokens', 'total'])
+  if (prompt != null) usage.prompt_tokens = prompt
+  if (completion != null) usage.completion_tokens = completion
+  if (total != null) usage.total_tokens = total
+  return hasTokenUsage(usage) ? usage : null
 }
 
 export function formatTokenUsage(usage: TokenUsage): string {
-  return `${usage.total_tokens} tokens · ${usage.prompt_tokens} entrée · ${usage.completion_tokens} sortie`
+  const parts: string[] = []
+  if (usage.total_tokens != null) parts.push(`${usage.total_tokens} tokens`)
+  if (usage.prompt_tokens != null) parts.push(`${usage.prompt_tokens} entrée`)
+  if (usage.completion_tokens != null) parts.push(`${usage.completion_tokens} sortie`)
+  return parts.join(' · ')
 }
 
 /** Incremental SSE parser: HTTP chunks are not SSE events. */
@@ -113,9 +153,16 @@ function parseDataPayload(payload: string): SseEvent | null {
   if (event.type === 'delta' && typeof event.content === 'string') {
     return { type: 'delta', content: event.content }
   }
-  if (event.type === 'done' && typeof event.reply === 'string') {
+  if (event.type === 'done') {
+    const reply = typeof event.reply === 'string' ? event.reply : typeof event.content === 'string' ? event.content : null
+    if (reply == null) return null
     const notification = event.notification == null ? null : String(event.notification)
-    return { type: 'done', reply: event.reply, notification, usage: parseTokenUsage(event.usage) }
+    const usage = parseTokenUsage(event.usage) ?? parseTokenUsage(event)
+    return { type: 'done', reply, notification, usage }
+  }
+  if (event.type === 'usage') {
+    const usage = parseTokenUsage(event.usage) ?? parseTokenUsage(event)
+    return usage ? { type: 'usage', usage } : null
   }
   if (event.type === 'error' && typeof event.message === 'string') {
     return { type: 'error', message: event.message }
@@ -131,28 +178,43 @@ export async function consumeChatStream(
   const reader = body.getReader()
   const decoder = new TextDecoder()
   const parser = new SseParser()
-  let result: StreamChatResult | null = null
-  let streamError: string | null = null
-  let ended = false
+  const acc: {
+    result: StreamChatResult | null
+    pendingUsage: TokenUsage | null
+    streamError: string | null
+    ended: boolean
+  } = { result: null, pendingUsage: null, streamError: null, ended: false }
 
   const throwIfAborted = () => {
     if (signal?.aborted) throw abortError()
   }
 
   const apply = (events: SseEvent[]) => {
+    if (signal?.aborted) return
     for (const event of events) {
       if (event.type === 'delta') onDelta(event.content)
       else if (event.type === 'done') {
-        result = { reply: event.reply, notification: event.notification, usage: event.usage }
-      }
-      else if (event.type === 'error') streamError = event.message
-      else if (event.type === 'end') ended = true
+        acc.result = {
+          reply: event.reply,
+          notification: event.notification,
+          usage: event.usage ?? acc.pendingUsage,
+        }
+      } else if (event.type === 'usage') {
+        acc.pendingUsage = event.usage
+        if (acc.result) acc.result = { ...acc.result, usage: event.usage }
+      } else if (event.type === 'error') acc.streamError = event.message
+      else if (event.type === 'end') acc.ended = true
     }
   }
 
+  const onAbort = () => {
+    reader.cancel().catch(() => undefined)
+  }
+  signal?.addEventListener('abort', onAbort)
+
   try {
     throwIfAborted()
-    while (!ended) {
+    while (!acc.ended) {
       throwIfAborted()
       const { done, value } = await reader.read()
       throwIfAborted()
@@ -163,7 +225,7 @@ export async function consumeChatStream(
       }
       apply(parser.feed(decoder.decode(value, { stream: true })))
       throwIfAborted()
-      if (streamError || ended) {
+      if (acc.streamError || acc.ended) {
         await reader.cancel().catch(() => undefined)
         break
       }
@@ -172,11 +234,19 @@ export async function consumeChatStream(
     if (isAbortError(err) || signal?.aborted) throw isAbortError(err) ? err : abortError()
     throw err
   } finally {
-    reader.releaseLock()
+    signal?.removeEventListener('abort', onAbort)
+    try {
+      reader.releaseLock()
+    } catch {
+      // Already released after cancel().
+    }
   }
 
   throwIfAborted()
-  if (streamError) throw new Error(streamError)
-  if (!result) throw new Error('La réponse a été interrompue.')
-  return result
+  if (acc.streamError) throw new Error(acc.streamError)
+  if (!acc.result) throw new Error('La réponse a été interrompue.')
+  return {
+    ...acc.result,
+    usage: acc.result.usage ?? acc.pendingUsage,
+  }
 }

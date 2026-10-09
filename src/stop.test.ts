@@ -42,6 +42,46 @@ describe('sendMessage abort', () => {
     expect(usedSignal?.aborted).toBe(true)
   })
 
+  it('ignores SSE chunks that arrive after abort so the UI cannot resume', async () => {
+    const controller = new AbortController()
+    const encoder = new TextEncoder()
+    const deltas: string[] = []
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(streamController) {
+          streamController.enqueue(encoder.encode('data: {"type":"delta","content":"A"}\n\n'))
+          init?.signal?.addEventListener('abort', () => {
+            try {
+              streamController.enqueue(encoder.encode('data: {"type":"delta","content":"B"}\n\n'))
+              streamController.enqueue(
+                encoder.encode(
+                  'data: {"type":"done","reply":"AB","notification":null}\n\ndata: [DONE]\n\n',
+                ),
+              )
+              streamController.close()
+            } catch {
+              // Stream already cancelled.
+            }
+          })
+        },
+      })
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }) as typeof fetch
+
+    const pending = sendMessage(
+      4,
+      'x',
+      'openai/gpt-4o',
+      (chunk) => {
+        deltas.push(chunk)
+        if (chunk === 'A') controller.abort()
+      },
+      controller.signal,
+    )
+    await expect(pending).rejects.toSatisfy(isAbortError)
+    expect(deltas).toEqual(['A'])
+  })
+
   it('aborts after several deltas and does not treat it as a completed reply', async () => {
     const controller = new AbortController()
     const encoder = new TextEncoder()
