@@ -4,6 +4,7 @@ Interface **React + TypeScript** (Vite) d’un tuteur Python pour débutants. L�
 
 Le frontend et le backend sont volontairement dans **deux dépôts distincts** :
 
+- **Application en ligne** : [https://study-buddy-ashy-pi.vercel.app/](https://study-buddy-ashy-pi.vercel.app/)
 - Backend : [https://github.com/FulbertDev-AI/RODIUMAI-BOOTCAMP-bootcamp-chatbot-backend.git](https://github.com/FulbertDev-AI/RODIUMAI-BOOTCAMP-bootcamp-chatbot-backend.git)
 - Frontend : [https://github.com/FulbertDev-AI/RODIUMAI-BOOTCAMP-bootcamp-chatbot-frontend.git](https://github.com/FulbertDev-AI/RODIUMAI-BOOTCAMP-bootcamp-chatbot-frontend.git)
 
