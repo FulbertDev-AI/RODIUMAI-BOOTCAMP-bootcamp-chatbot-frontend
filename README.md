@@ -32,7 +32,7 @@ Le backend doit tourner **séparément** sur le port **8000**. Depuis `bootcamp-
 uv run fastapi dev main.py
 ```
 
-Puis, depuis ce dépôt :
+Puis, depuis ce dépôt(bootcamp-chatbot-frontend) :
 
 ```bash
 npm install
@@ -185,6 +185,7 @@ Dernière exécution observée dans ce dépôt :
 | 1 — Retry après erreur LLM | Réalisé |
 | 2 — Stop pendant le streaming (`AbortController`) | Réalisé |
 | 3 — Affichage des tokens (`usage` du `done`) | Réalisé |
+| 4 — Déploiement sur Render + Vercel | Réalisé |
 
 ---
 
